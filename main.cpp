@@ -2,6 +2,8 @@
 #include <iostream>
 #include <vector>
 
+#define SDL_MAIN_HANDLED
+#include <SDL.h>
 #include "finitedifference.hpp"
 #include "mesh.hpp"
 #include "option.hpp"
