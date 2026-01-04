@@ -1,0 +1,535 @@
+\documentclass[11pt,a4paper]{article}
+\usepackage[utf8]{inputenc}
+\usepackage[french]{babel}
+\usepackage{amsmath}
+\usepackage{amsthm}
+\usepackage{amsfonts}
+\usepackage{xcolor}
+\usepackage{amssymb}
+\usepackage{graphicx}
+\usepackage{hyperref}
+\usepackage{lscape}
+
+\hypersetup{
+    colorlinks=true,
+    linkcolor=blue,
+    filecolor=magenta,      
+    urlcolor=cyan,
+    pdftitle={Projet Black-Scholes - Différences Finies},
+    pdfpagemode=FullScreen,
+}
+\usepackage{stmaryrd}
+\usepackage{relsize}
+\usepackage{listings}
+\usepackage{courier}
+\usepackage{float}
+\usepackage[left=2.5cm,right=2.5cm,top=2.5cm,bottom=2.5cm]{geometry}
+\lstset{
+    language=C++,
+    basicstyle=\ttfamily\small,
+    keywordstyle=\color{blue},
+    commentstyle=\color{gray},
+    stringstyle=\color{red},
+    numbers=left,
+    numberstyle=\tiny\color{gray},
+    stepnumber=1,
+    numbersep=5pt,
+    backgroundcolor=\color{white},
+    showspaces=false,
+    showstringspaces=false,
+    showtabs=false,
+    frame=single,
+    tabsize=4,
+    captionpos=b,
+    breaklines=true,
+    breakatwhitespace=false,
+    escapeinside={\%*}{*)},
+    morekeywords={override}
+}
+
+\title{\textbf{ Implémentation d'un Pricer Black-Scholes par Différences Finies}}
+
+\author{\textbf{Abahamou Ziad / El Azri Amine}}
+\date{Janvier 2025}
+
+\newcommand{\deriv}[3][]{\ensuremath{\frac{\partial^{#1} {#2}}{\partial {#3}^{#1}}}}
+\newcommand*{\intval}[2]{\llbracket #1, #2 \rrbracket}
+\newcommand*{\C}[2]{\mathbf{C}^{#1}_{#2}}
+
+\theoremstyle{plain}
+\newtheorem{theorem}{Théorème}
+\newtheorem{lemma}{Lemme}
+\newtheorem{remark}{Remarque}
+\newtheorem{definition}{Définition}
+\DeclareMathOperator{\R}{\mathbb{R}}
+
+\renewcommand\qedsymbol{$\blacksquare$}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Ce document présente le développement complet d'un pricer d'options européennes basé sur l'équation de Black-Scholes. L'approche combine théorie mathématique et implémentation pratique en C++, avec un focus particulier sur l'architecture logicielle, les structures de données optimisées, et la visualisation graphique des résultats. Deux méthodes numériques sont implémentées et comparées : le schéma implicite pour l'EDP réduite et le schéma de Crank-Nicolson pour l'EDP complète.
+\end{abstract}
+
+\tableofcontents
+\newpage
+
+\section{Introduction}
+
+\subsection{Contexte du projet}
+
+Le pricing d'options financières constitue un domaine fondamental de la finance quantitative. L'équation de Black-Scholes fournit un cadre théorique rigoureux pour évaluer ces instruments dérivés, mais nécessite des méthodes numériques pour obtenir des solutions pratiques.
+
+\subsection{Objectifs}
+
+Ce projet poursuit trois objectifs principaux :
+\begin{enumerate}
+\item Implémenter deux approches numériques pour résoudre l'équation de Black-Scholes
+\item Concevoir une architecture logicielle modulaire et extensible en C++
+\item Développer un système de visualisation graphique pour analyser les résultats
+\end{enumerate}
+
+\section{Fondements Mathématiques}
+
+\subsection{Le modèle de Black-Scholes}
+
+\subsubsection{Équation complète}
+
+L'équation de Black-Scholes gouvernant le prix $C(t,S)$ d'une option s'écrit :
+
+\begin{equation}
+\label{eq:bs_complete}
+\deriv{C}{t} + rS\deriv{C}{S} + \frac{1}{2}\sigma^2S^2\deriv[2]{C}{S} - rC = 0
+\end{equation}
+
+où :
+\begin{itemize}
+\item $C(t,S)$ : prix de l'option au temps $t$ pour un sous-jacent de valeur $S$
+\item $r$ : taux d'intérêt sans risque
+\item $\sigma$ : volatilité du sous-jacent
+\item $T$ : maturité de l'option
+\end{itemize}
+
+Cette EDP combine trois termes : transport ($rS\deriv{C}{S}$), diffusion ($\frac{1}{2}\sigma^2S^2\deriv[2]{C}{S}$), et décroissance exponentielle ($-rC$).
+
+\subsubsection{Équation réduite}
+
+Par une série de transformations (passage en coordonnées logarithmiques, normalisation temporelle, et décalage convectif), l'équation \eqref{eq:bs_complete} peut être ramenée à une forme simplifiée :
+
+\begin{equation}
+\label{eq:bs_reduced}
+\deriv{\widetilde{C}}{\widetilde{t}} = \mu \deriv[2]{\widetilde{C}}{\widetilde{S}}
+\end{equation}
+
+Cette équation de diffusion pure est structurellement identique à l'équation de la chaleur, avec $\mu = \frac{1}{2}\sigma^2$ comme coefficient de diffusion.
+
+\subsection{Discrétisation du domaine}
+
+\subsubsection{Maillage}
+
+Le domaine de résolution $\mathcal{D} = [0,T] \times [0,L]$ est discrétisé uniformément :
+
+\begin{align*}
+\text{Maillage temporel : } & t_m = m\Delta t, \quad m \in \intval{0}{M}, \quad \Delta t = \frac{T}{M} \\
+\text{Maillage spatial : } & s_j = j\Delta s, \quad j \in \intval{0}{N}, \quad \Delta s = \frac{L}{N}
+\end{align*}
+
+On note $\C{m}{j} \approx C(t_m, s_j)$ la valeur approchée de l'option au nœud $(m,j)$.
+
+\subsubsection{Conditions aux limites}
+
+Le problème nécessite :
+\begin{itemize}
+\item \textbf{Condition terminale} (en $t=T$) : donnée par le payoff de l'option
+\begin{align*}
+\text{Call : } & C(T, S) = \max(S - K, 0) \\
+\text{Put : } & C(T, S) = \max(K - S, 0)
+\end{align*}
+
+\item \textbf{Conditions aux bords} (en $S=0$ et $S=L$) :
+\begin{align*}
+\text{Put : } & C(t, 0) = Ke^{-r(T-t)}, \quad C(t, L) = 0 \\
+\text{Call : } & C(t, 0) = 0, \quad C(t, L) = L - Ke^{-r(T-t)}
+\end{align*}
+\end{itemize}
+
+\section{Méthodes de Différences Finies}
+
+\subsection{Schéma implicite pour l'EDP réduite}
+
+\subsubsection{Principe et stabilité}
+
+Le schéma implicite évalue les dérivées spatiales au temps futur $t_{m+1}$, garantissant une stabilité inconditionnelle. Pour l'équation \eqref{eq:bs_reduced}, la discrétisation donne :
+
+\begin{equation}
+\frac{\C{m+1}{j} - \C{m}{j}}{\Delta t} = \mu \frac{\C{m+1}{j+1} - 2\C{m+1}{j} + \C{m+1}{j-1}}{(\Delta s)^2}
+\end{equation}
+
+\subsubsection{Formulation matricielle}
+
+En posant $\alpha = \frac{\mu\Delta t}{(\Delta s)^2}$, le réarrangement conduit à :
+
+\begin{equation}
+\boxed{-\alpha\C{m+1}{j-1} + (1+2\alpha)\C{m+1}{j} - \alpha\C{m+1}{j+1} = \C{m}{j}}
+\end{equation}
+
+Pour les nœuds intérieurs $j \in \intval{1}{N-1}$, on obtient le système matriciel :
+
+\begin{equation}
+M \mathbf{C}^{m+1} + \mathbf{k}_{m+1} = \mathbf{C}^m
+\end{equation}
+
+où $M \in \mathcal{M}_{N-1}(\R)$ est tridiagonale :
+
+$$
+M = \begin{pmatrix}
+1+2\alpha & -\alpha & 0 & \cdots & 0 \\
+-\alpha & 1+2\alpha & -\alpha & \ddots & \vdots \\
+0 & \ddots & \ddots & \ddots & 0 \\
+\vdots & \ddots & -\alpha & 1+2\alpha & -\alpha \\
+0 & \cdots & 0 & -\alpha & 1+2\alpha
+\end{pmatrix}
+$$
+
+Le vecteur $\mathbf{k}_{m+1}$ contient les termes de bord.
+
+Cette formulation matricielle permet d'exprimer le schéma implicite sous la forme $ M \mathbf{C}^{m+1} + \mathbf{k}_{m+1} = \mathbf{C}^m $, où $ M $ est une matrice tridiagonale constante dans le temps. Dans l'implémentation, nous n'allons pas stocker cette matrice sous forme pleine, mais uniquement ses trois diagonales (sous-diagonale, diagonale principale, sur-diagonale) pour optimiser l'utilisation mémoire et faciliter la résolution par l'algorithme de Thomas.
+
+\subsection{Schéma de Crank-Nicolson pour l'EDP complète}
+
+\subsubsection{Principe du $\theta$-schéma}
+
+Crank-Nicolson est un $\theta$-schéma avec $\theta = \frac{1}{2}$, moyennant les approches explicite et implicite. Cette méthode atteint une précision d'ordre 2 en temps.
+
+\subsubsection{Discrétisation}
+
+Les dérivées sont approximées par des moyennes arithmétiques :
+
+\begin{align*}
+\deriv{C}{t} &\simeq \frac{\C{m+1}{j} - \C{m}{j}}{\Delta t} \\
+\deriv{C}{S} &\simeq \frac{1}{4\Delta s}\left[(\C{m+1}{j+1} - \C{m+1}{j-1}) + (\C{m}{j+1} - \C{m}{j-1})\right] \\
+\deriv[2]{C}{S} &\simeq \frac{1}{2(\Delta s)^2}\left[(\C{m+1}{j+1} - 2\C{m+1}{j} + \C{m+1}{j-1})\right. \\
+&\quad\quad\quad\quad\quad\left. + (\C{m}{j+1} - 2\C{m}{j} + \C{m}{j-1})\right]
+\end{align*}
+
+\subsubsection{Coefficients matriciels}
+
+L'injection dans \eqref{eq:bs_complete} et le réarrangement conduisent à un système :
+
+\begin{equation}
+M_1 \mathbf{C}^{m+1} + \mathbf{k}_{m+1} = M_2 \mathbf{C}^m
+\end{equation}
+
+avec des coefficients dépendant de l'indice spatial $j$ :
+
+\begin{align*}
+a_j &= \frac{j\Delta t}{4}(\sigma^2 j - r) \\
+b_j &= 1 - \frac{1}{2}\sigma^2 j^2 \Delta t \\
+c_j &= \frac{j\Delta t}{4}(\sigma^2 j + r) \\
+d_j &= 1 + \frac{1}{2}\sigma^2 j^2 \Delta t + r\Delta t
+\end{align*}
+
+Les matrices $M_1$ et $M_2$ sont tridiagonales :
+\begin{itemize}
+\item $M_1$ : diagonale $(b_j)$, sous/sur-diagonales $(a_j, c_j)$
+\item $M_2$ : diagonale $(d_j)$, sous/sur-diagonales $(-a_j, -c_j)$
+\end{itemize}
+
+Les deux méthodes conduisent à des systèmes tridiagonaux de la forme $Ax = b$. L'algorithme de Thomas est une méthode directe de résolution de systèmes linéaires tridiagonaux. Il est particulièrement adapté aux schémas de différences finies qui génèrent naturellement de telles matrices. Pour l'EDP complète discrétisée via Crank–Nicolson, nous obtenons également un système tridiagonal à chaque pas de temps, que nous résolvons efficacement avec cet algorithme. Nous l'avons choisi pour sa simplicité d'implémentation et son adéquation parfaite à la structure tridiagonale de nos matrices.
+
+\section{Conception Logicielle}
+
+\subsection{Architecture du projet}
+
+L'implémentation repose sur une hiérarchie de classes modulaire exploitant l'héritage et le polymorphisme :
+
+\begin{itemize}
+\item \texttt{class Mesh} : gestion des discrétisations
+\item \texttt{class Payoff} (abstraite) : interface pour les payoffs
+\begin{itemize}
+\item \texttt{class Call}, \texttt{class Put} : implémentations concrètes
+\end{itemize}
+\item \texttt{class Option} : conteneur de paramètres
+\item \texttt{class PDE} (abstraite) : définition des conditions aux limites
+\begin{itemize}
+\item \texttt{class CompletePDE}, \texttt{class ReducedPDE}
+\end{itemize}
+\item \texttt{class FiniteDifference} (abstraite) : interface des solveurs
+\begin{itemize}
+\item \texttt{class IMFD} : schéma implicite
+\item \texttt{class CrankNicholsonFD} : schéma de Crank-Nicolson
+\end{itemize}
+\end{itemize}
+
+\subsection{Diagramme UML}
+
+\begin{figure}[H]
+\centering
+\includegraphics[width=1.2\textwidth]{images/UML.png}
+\caption{Diagramme UML des classes de ce projet }
+\label{fig:uml_diagram}
+\end{figure}
+
+\section{Implémentation C++}
+\subsubsection{Structure de base}
+
+Les payoffs sont implémentés via une classe abstraite et héritage, permettant de définir différentes fonctions de paiement :
+
+\begin{lstlisting}
+class Payoff {
+public:
+    virtual Payofftype get_payofftype() const = 0;
+    virtual double operator()(const double& s) const = 0;
+    virtual ~Payoff() {}
+};
+\end{lstlisting}
+
+\subsubsection{Implémentation des options Call et Put}
+
+\begin{lstlisting}
+class Call : public Payoff {
+private:
+    double K;
+    Payofftype type;
+    
+public:
+    Call(const double& K_ = 0.0) : K(K_), type(Payofftype::call) {}
+    
+    Payofftype get_payofftype() const override {
+        return type;
+    }
+    
+    double operator()(const double& s) const override {
+        return std::max(s - K, 0.0);
+    }
+};
+
+class Put : public Payoff {
+private:
+    double K;
+    Payofftype type;
+    
+public:
+    Put(const double& K_) : K(K_), type(Payofftype::put) {}
+    
+    Payofftype get_payofftype() const override {
+        return type;
+    }
+    
+    double operator()(const double& s) const override {
+        return std::max(K - s, 0.0);
+    }
+};
+\end{lstlisting}
+
+\textbf{Avantages de cette approche} :
+\begin{itemize}
+    \item Extensibilité facile pour ajouter de nouveaux types d'options
+    \item Polymorphisme permettant de traiter uniformément différents payoffs
+    \item Encapsulation des règles métier financières
+\end{itemize}
+
+\subsection{Classe Option : Conteneur de paramètres}
+
+La classe \texttt{Option} regroupe tous les paramètres nécessaires à la définition d'une option européenne :
+
+\begin{lstlisting}
+class Option {
+public:
+    double L;
+    double r;
+    double K;
+    double T;
+    double sigma;
+    Payoff* payoff;
+    
+public:
+    Option(const double T_, const double r_, const double K_, 
+           const double sigma_, const double L_, Payoff* payoff_) {
+        T = T_;
+        r = r_;
+        K = K_;
+        sigma = sigma_;
+        L = L_;
+        payoff = payoff_;
+    }
+    
+    double get_T() const { return T; }
+    double get_r() const { return r; }
+    double get_K() const { return K; }
+    double get_sigma() const { return sigma; }
+    double get_L() const { return L; }
+    Payoff* get_payoff() const { return payoff; }
+};
+\end{lstlisting}
+
+\textbf{Objectif} : Centraliser les paramètres financiers pour éviter leur dispersion dans le code.
+
+\subsection{Classes PDE : Modélisation mathématique}
+
+\subsubsection{Interface abstraite}
+
+La classe \texttt{PDE} définit l'interface commune pour les deux formes de l'équation de Black-Scholes :
+
+\begin{lstlisting}
+class PDE {
+protected:
+    Option* option;
+    
+public:
+    PDE(Option* option_) : option(option_) {}
+    
+    virtual double get_coeff_a() const = 0;
+    virtual double get_cdt_bord_b(double t) const = 0;
+    virtual double get_cdt_bord_h(double t, double s) const = 0;
+    virtual double get_cdt_term(double s) const = 0;
+    virtual ~PDE() {}
+};
+\end{lstlisting}
+
+\subsubsection{EDP complète}
+
+Pour l'EDP complète de Black-Scholes, nous devons calculer les coefficients variables :
+
+\begin{lstlisting}
+double CompletePDE::get_coeff_b(double s) const {
+    return 0.5 * pow((option->sigma), 2.0) * pow(s, 2.0);
+}
+
+double CompletePDE::get_coeff_c(double s) const {
+    return (option->r) * s;
+}
+\end{lstlisting}
+
+\subsubsection{EDP réduite}
+
+Pour l'EDP réduite (forme de la chaleur), les coefficients sont constants :
+
+\begin{lstlisting}
+double ReducedPDE::get_coeff_b() const {
+    return -0.5 * pow(option->sigma, 2);
+}
+\end{lstlisting}
+
+\subsubsection{Conditions aux limites}
+
+Les conditions aux bords sont déterminées dynamiquement selon le type de payoff :
+
+\begin{lstlisting}
+double CompletePDE::get_cdt_bord_b(double t) const {
+    if (option->payoff->get_payofftype() == Payofftype::call)
+        return 0.0;
+    else
+        return (option->K) * exp(-(option->r) * (t - option->T));
+}
+
+double CompletePDE::get_cdt_bord_h(double t, double s) const {
+    if (option->payoff->get_payofftype() == Payofftype::call)
+        return s - (option->K) * exp(-(option->r) * (t - option->T));
+    else
+        return 0.0;
+}
+\end{lstlisting}
+
+\subsection{Classes FiniteDifference : Résolution numérique}
+
+La résolution numérique proprement dite est encapsulée dans les classes \texttt{IMFD} (schéma implicite) et \texttt{CrankNicholsonFD} (schéma de Crank-Nicolson). Ces classes héritent d'une interface commune \texttt{FiniteDifference} qui définit les opérations essentielles : initialisation du maillage, calcul des coefficients, résolution temporelle et export des résultats.
+
+\texttt{IMFD} implémente le schéma implicite pour l'EDP réduite, avec des coefficients matriciels constants. \texttt{CrankNicholsonFD} gère le schéma du même nom pour l'EDP complète, avec des coefficients dépendant de la position spatiale. Les deux classes utilisent l'algorithme de Thomas pour résoudre les systèmes tridiagonaux à chaque pas de temps.
+
+\subsection{Classe Mesh : Gestion des discrétisations}
+
+La classe \texttt{Mesh} encapsule une discrétisation uniforme d'un intervalle. Elle génère automatiquement les points de discrétisation selon la formule $x_i = i \cdot \frac{a}{n}$, fournit un accès sécurisé avec vérification des bornes, et permet la conversion vers \texttt{std::vector<double>} pour l'interopérabilité avec les modules de visualisation.
+
+\subsection{Module de Visualisation Graphique (SDL2)}
+
+Le module graphique repose sur SDL2 et comprend deux classes principales :
+\begin{itemize}
+    \item \texttt{Window} : Gère une fenêtre individuelle, le tracé des courbes et la conversion des coordonnées mathématiques en pixels
+    \item \texttt{Sdl} : Coordonne l'affichage simultané de 4 fenêtres et gère les événements utilisateur
+\end{itemize}
+
+La principale difficulté a été la conversion des coordonnées réelles $(s, C) \in \mathbb{R}^2$ en pixels $(x, y) \in \mathbb{N}^2$. Nous avons implémenté une fonction de mapping qui préserve les proportions tout en créant des marges autour du graphique.
+
+Le module permet d'afficher simultanément :
+\begin{enumerate}
+    \item La superposition des solutions pour les options Put
+    \item L'erreur numérique pour les options Put
+    \item La superposition des solutions pour les options Call
+    \item L'erreur numérique pour les options Call
+\end{enumerate}
+
+\subsection{Programme principal "main.cpp"}
+
+Le fichier \texttt{main.cpp} orchestre l'ensemble du processus :
+\begin{enumerate}
+    \item Définition des paramètres de simulation
+    \item Création des objets financiers (payoffs et options)
+    \item Initialisation des EDP
+    \item Création et exécution des solveurs
+    \item Export des résultats en CSV
+    \item Calcul des erreurs entre méthodes
+    \item Configuration et affichage graphique
+    \item Nettoyage mémoire
+\end{enumerate}
+
+\section{Résultats et Validation}
+
+\subsection{Analyse des erreurs numériques}
+
+L'interface graphique développée avec SDL2 permet d'afficher simultanément quatre fenêtres offrant une analyse comparative complète des résultats. Cette organisation  permet d'évaluer visuellement la qualité des solutions obtenues par les deux méthodes numériques pour les deux types d'options.
+
+\begin{figure}[H]
+\centering
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{images/put.png}
+\caption{Fenêtre 1 : Put - Superposition des solutions}
+\label{fig:fenetre1}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{images/err_put.png}
+\caption{Fenêtre 2 : Put - Erreur absolue}
+\label{fig:fenetre2}
+\end{minipage}
+
+\vspace{1cm}
+
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{images/call.png}
+\caption{Fenêtre 3 : Call - Superposition des solutions}
+\label{fig:fenetre3}
+\end{minipage}
+\hfill
+\begin{minipage}{0.48\textwidth}
+\centering
+\includegraphics[width=\linewidth]{images/err_call.png}
+\caption{Fenêtre 4 : Call - Erreur absolue}
+\label{fig:fenetre4}
+\end{minipage}
+\end{figure}
+
+\subsubsection{Fenêtres 1 et 3 : Superposition des solutions}
+
+Les fenêtres 1 (Put) et 3 (Call) présentent la superposition des deux solutions obtenues par les méthodes Crank-Nicolson (courbe cyan) et implicite (courbe jaune). La comparaison visuelle montre une excellente concordance qualitative entre les deux approches. Pour l'option Put (Fig. \ref{fig:fenetre1}), on observe la décroissance caractéristique du prix avec l'augmentation du sous-jacent, tandis que pour l'option Call (Fig. \ref{fig:fenetre3}), on constate la croissance attendue.
+
+\subsubsection{Fenêtres 2 et 4 : Analyse quantitative des erreurs}
+
+Les fenêtres 2 (Put) et 4 (Call) quantifient l'écart entre les deux méthodes en affichant l'erreur absolue $|C_{CN} - C_{IM}|$. L'analyse numérique révèle des caractéristiques intéressantes :
+
+\begin{itemize}
+    \item \textbf{Option Put} : L'erreur moyenne s'élève à \textbf{2.726 unités}, indiquant un écart modéré entre les deux méthodes
+    \item \textbf{Option Call} : L'erreur moyenne atteint \textbf{5.402 unités}, soit près du double de celle observée pour le Put
+    \item \textbf{Erreur globale} : La moyenne pondérée sur les deux types d'options donne \textbf{4.064 unités}
+\end{itemize}
+
+Ces différences s'expliquent par la nature asymétrique des payoffs Put et Call. Pour le Put, la solution présente une décroissance régulière, tandis que le Call présente une croissance plus marquée, ce qui pourrait amplifier les écarts numériques.
+
+La superposition visuelle satisfaisante des courbes cyan et jaune dans les fenêtres 1 et 3, combinée à ces erreurs numériques quantifiées, valide globalement notre implémentation. Les profils de prix obtenus correspondent aux attentes théoriques, avec des caractéristiques conformes à la littérature financière.
+
+\end{document}

@@ -1,0 +1,23 @@
+# Fichiers compilés
+*.o
+*.exe
+prog
+a.out
+
+# Dossiers Doxygen
+html/
+latex/
+
+# Fichiers LaTeX temporaires
+*.aux
+*.log
+*.toc
+*.out
+*.synctex.gz
+*.fdb_latexmk
+*.fls
+
+# Fichiers temporaires
+*.tmp
+*~
+.DS_Store
